@@ -1,0 +1,52 @@
+name: Container Security Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  security-gate:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@v4
+
+      - name: Build container image
+        run: docker build --tag trivy-demo:${{ github.sha }} .
+
+      - name: Scan image with Trivy
+        id: trivy_scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: trivy-demo:${{ github.sha }}
+          format: json
+          output: trivy-results.json
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: "1"
+
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report-${{ github.run_number }}
+          path: trivy-results.json
+          if-no-files-found: warn
+
+      - name: Enforce security gate
+        if: steps.trivy_scan.outcome == 'failure'
+        run: |
+          echo "Security gate blocked: High or Critical vulnerabilities were found."
+          exit 1
+
+      - name: Confirm security gate passed
+        if: steps.trivy_scan.outcome == 'success'
+        run: echo "Security gate passed."
